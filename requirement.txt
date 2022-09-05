@@ -1,6 +1,7 @@
 streamlit
 requests
 pandas
-ipykernel
 plotly_express
 geopy
+folium
+streamlit_folium

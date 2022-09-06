@@ -146,7 +146,7 @@ if len(dfSoldDistFilt.index)>0:
 # folium_static(map, width=1250, height=500)
 
     #%%
-    #fig = px.scatter(df, x='soldDate', y='price')#, color='GEOL_LEG_C', symbol='GEOL_LEG_C')
+    fig = px.scatter(dfSoldDistFilt, x='soldDate', y='price')#, color='GEOL_LEG_C', symbol='GEOL_LEG_C')
 
     # fig.update_layout(
     #     title={
@@ -168,18 +168,9 @@ if len(dfSoldDistFilt.index)>0:
     # fig.update_xaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
     # fig.update_yaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
 
-    #st.plotly_chart(fig)
+    st.plotly_chart(fig)
 
 #if st.button('Konverter data'):
         #st.dataframe(df)
 
-
-
-
-#%%
-
-#(55.79044716, 12.48303272) (55.796078, 12.474497) 824.4377151389953
-# coords_adr = (55.79044716, 12.48303272)
-# coords_sold = (55.796078, 12.474497)
-# print(geopy.distance.geodesic(coords_adr, coords_sold).m)
 

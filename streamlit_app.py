@@ -66,7 +66,7 @@ def fnc_findAdressInRadius(dfAdress, dfSold):
     dfSold['Distance_m'] = "" 
 
     if len(dfAdress)>0:
-        coords_adr = (55.79044716, 12.48303272)#(dfAdress['adgangsadresse.y'], dfAdress['adgangsadresse.x'])
+        coords_adr = (dfAdress['adgangsadresse.y'], dfAdress['adgangsadresse.x'])
     else:
         coords_adr = (55.79044716, 12.48303272)
 
@@ -89,13 +89,14 @@ featGrp_Solgte = folium.FeatureGroup("Solgte ejendomme")
 featGrp_Adress = folium.FeatureGroup("Valgte adresse")
 
 with st.sidebar:
-    postNr = st.number_input("Postnummer", value=2830, min_value=0, format="%i")
-    soldYear = st.number_input("Tidligste salgsår", value=2020, min_value=2015, format="%i")
+    postNr = st.number_input("Postnummer", value=3450, min_value=0, format="%i")
+    soldYear = st.number_input("Tidligste salgsår", value=2020, min_value=1990, format="%i")
     distFilt_m = st.number_input("Søge afstand fra adresse", value=500, min_value=100, max_value=10000, format="%i")
+    adresseStr = st.text_input("Skriv adresse i den valgte kommune")
 
     if st.button('Hent data'):
         #dfpst = fnc_getPostalCode()
-        dfadr = fnc_getAdressCoordinates("Hjertebjergvej 12", postNr)
+        dfadr = fnc_getAdressCoordinates(adresseStr, postNr)
         dfSold = fnc_getSoldData(postNr, soldYear)
         dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
         dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
@@ -170,6 +171,7 @@ if len(dfSoldDistFilt.index)>0:
 
     st.plotly_chart(fig)
 
+    st.dataframe(dfSoldDistFilt)
 #if st.button('Konverter data'):
         #st.dataframe(df)
 

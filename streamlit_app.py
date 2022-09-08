@@ -9,6 +9,7 @@ import geopy.distance
 from streamlit_folium import folium_static
 import folium
 
+
 # Get all Postal codes 
 # https://api.dataforsyningen.dk/postnumre
 @st.cache
@@ -35,30 +36,34 @@ def fnc_getAdressCoordinates(adressStr: str, postNr: int):
 
 # Get sold properties
 @st.cache(allow_output_mutation=True) # Mutations??
-def fnc_getSoldData(postNr: int, soldYear: int):
-    response = requests.get(f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={postNr}&zipcodeTo={postNr}")
+def fnc_getSoldData(postNr: list, soldYear: int):
 
-    tRes = json.loads(response.text)
+    dfSold = pd.DataFrame()
 
-    dfh = pd.json_normalize(tRes)
-    pages = dfh.iloc[0,4]
-    df = pd.DataFrame()
-    
-    for x in range(pages):
-        apiUrl = f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={postNr}&zipcodeTo={postNr}&page={x+1}"
-        response = requests.get(apiUrl)
-        sold = json.loads(response.text)
-        dftmp = pd.json_normalize(sold, record_path=['results'])
-        dftmp['soldDate'] =  pd.to_datetime(dftmp['soldDate'], infer_datetime_format=True)
+    for cntPst in postNr:
+        response = requests.get(f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}")
+        tRes = json.loads(response.text)
 
-        dateYear = dftmp.iloc[0,4].year
+        dfh = pd.json_normalize(tRes)
+        pages = dfh.iloc[0,4]
+        df = pd.DataFrame()
+        for x in range(pages):
+            apiUrl = f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}&page={x+1}"
+            response = requests.get(apiUrl)
+            sold = json.loads(response.text)
+            dftmp = pd.json_normalize(sold, record_path=['results'])
+            dftmp['soldDate'] =  pd.to_datetime(dftmp['soldDate'], infer_datetime_format=True)
 
-        if dateYear == soldYear-1:
-            break
+            dateYear = dftmp.iloc[0,4].year
 
-        df = pd.concat([df, dftmp])
+            if dateYear == soldYear-1:
+                break
 
-    return df  
+            df = pd.concat([df, dftmp])
+
+        dfSold = pd.concat([dfSold, df]) 
+
+    return dfSold  
 
 #@st.cache
 def fnc_findAdressInRadius(dfAdress, dfSold):
@@ -79,41 +84,67 @@ def fnc_findAdressInRadius(dfAdress, dfSold):
         
     return dfSold
 
-#%%
+# Generate city name in multiselect
+def fnc_getName(pstNr, dfpst):
+    byNavn = dfpst.query("nr == @pstNr").iloc[0,2] 
+    return pstNr + " - " + byNavn
+
+
 
 #######################################################################################
 dfSoldDistFilt = pd.DataFrame()
 dfSoldDist = pd.DataFrame()
+dfSold = pd.DataFrame()
 dfSoldDist['Distance_m'] = 0
 featGrp_Solgte = folium.FeatureGroup("Solgte ejendomme")
 featGrp_Adress = folium.FeatureGroup("Valgte adresse")
 
 with st.sidebar:
-    postNr = st.number_input("Postnummer", value=3450, min_value=0, format="%i")
-    soldYear = st.number_input("Tidligste salgsår", value=2020, min_value=1990, format="%i")
-    distFilt_m = st.number_input("Søge afstand fra adresse", value=500, min_value=100, max_value=10000, format="%i")
-    adresseStr = st.text_input("Skriv adresse i den valgte kommune")
+    
+    dfpst = fnc_getPostalCode()
+    postNr = st.multiselect("Vælg postnummer", dfpst["nr"], format_func=lambda pstNr: fnc_getName(pstNr, dfpst))
+    #postNr = st.number_input("Postnummer", value=2830, min_value=0, format="%i")
+    soldYear = st.number_input("Tidligste salgsår", value=2021, min_value=1990, format="%i")
 
-    if st.button('Hent data'):
-        #dfpst = fnc_getPostalCode()
-        dfadr = fnc_getAdressCoordinates(adresseStr, postNr)
-        dfSold = fnc_getSoldData(postNr, soldYear)
-        dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
-        dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
+    dfSold = fnc_getSoldData(postNr, soldYear)
+    # for cntPst in postNr:
+    #     dfSold_tmp = fnc_getSoldData(cntPst, soldYear)
+    #     dfSold = pd.concat([dfSold,dfSold_tmp])
+    
+    adresseStr = st.text_input("Skriv adresse i den valgte kommune", value="Hjertebjergvej 12")
+    distFilt_m = st.number_input("Søge afstand fra adresse", value=500, step=250, min_value=100, max_value=10000, format="%i")
+    dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
+    dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
+    dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
+    blShowPostCd = st.checkbox("Vis postnummer på kortet")
 
-        st.write(len(dfSoldDistFilt.index))
-
-
-if len(dfSoldDistFilt.index)>0:
+if len(dfSoldDist.index)>0:
     #st.dataframe(dfSoldDistFilt)
     #Plot with center of jordstykke as center of map
     coords_adr = (dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x'])
-    map = folium.Map(location=coords_adr, zoom_start=15, tiles='CartoDB positron')
+    map = folium.Map(location=coords_adr, zoom_start=15, tiles='OpenStreetMap')
     
+    # Read topo with postal codes
+    with open('postnumre.json') as f:
+        postNr_topo = json.load(f)
+
+    # Add topo to map
+    cp = folium.Choropleth(geo_data=postNr_topo,
+             topojson='objects.postnumre',
+             key_on='feature.properties.POSTNR_TXT',
+             fill_color='white', 
+             fill_opacity=0.2,
+             line_color='black', 
+             line_opacity=0.5).add_to(map)
+    
+    if blShowPostCd:
+        folium.GeoJsonTooltip(['POSTNR_TXT']).add_to(cp.geojson)
+    #folium.LayerControl().add_to(map)
+
     # Add adress
     folium.CircleMarker([dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x']],
             radius=10,
-            popup="Adresse:" + "Hjertebjergvej 12",
+            popup="Adresse:" + dfadr['adgangsadresse.vejnavn'] + " " + dfadr['adgangsadresse.husnr'],
             color='green',
             fill=True,
             fill_color='#cc0000',
@@ -146,7 +177,7 @@ if len(dfSoldDistFilt.index)>0:
 
 # folium_static(map, width=1250, height=500)
 
-    #%%
+
     fig = px.scatter(dfSoldDistFilt, x='soldDate', y='price')#, color='GEOL_LEG_C', symbol='GEOL_LEG_C')
 
     # fig.update_layout(
@@ -176,3 +207,38 @@ if len(dfSoldDistFilt.index)>0:
         #st.dataframe(df)
 
 
+#%%
+
+
+
+#%%
+
+# dfpst = fnc_getPostalCode()
+# pstNr = '2800'
+# dfbyNavn = dfpst.query("nr == @pstNr").iloc[0,2] 
+# byNavn = dfbyNavn.iloc[0,2] 
+
+#states_topo.keys()
+#states_topo['objects'].keys()
+#postNr_topo['objects']['postnumre'].keys()
+#postNr_topo['objects']['postnumre']['geometries'][0]['properties']['POSTNR_TXT']
+
+# with open('postnumre.json') as f:
+#     postNr_topo = json.load(f)
+
+# folium_map = folium.Map(location=[55.79044716, 12.48303272],
+#                         zoom_start=10,
+#                         tiles="OpenStreetMap")
+
+# cp = folium.Choropleth(geo_data=postNr_topo,
+#              topojson='objects.postnumre',
+#              key_on='feature.properties.POSTNR_TXT',
+#              fill_color='white', 
+#              fill_opacity=0.2,
+#              line_color='black', 
+#              line_opacity=0.5).add_to(folium_map)
+
+# folium.GeoJsonTooltip(['POSTNR_TXT']).add_to(cp.geojson)
+# folium.LayerControl().add_to(folium_map)
+
+# folium_map

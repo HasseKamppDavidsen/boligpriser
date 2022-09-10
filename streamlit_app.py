@@ -8,16 +8,22 @@ import plotly.express as px
 import geopy.distance
 from streamlit_folium import folium_static
 import folium
+import openpyxl
 
+st.set_page_config(layout="wide")
+
+#%%
 
 # Get all Postal codes 
 # https://api.dataforsyningen.dk/postnumre
 @st.cache
 def fnc_getPostalCode():
-    response = requests.get("https://api.dataforsyningen.dk/postnumre")
-    tRes = json.loads(response.text)
+    # response = requests.get("https://api.dataforsyningen.dk/postnumre")
+    # tRes = json.loads(response.text)
 
-    dfh = pd.json_normalize(tRes)
+    # dfh = pd.json_normalize(tRes)
+
+    dfh = pd.read_excel("postalCodes.xlsx")
     
     return dfh
 
@@ -35,33 +41,37 @@ def fnc_getAdressCoordinates(adressStr: str, postNr: int):
     # if adress does not exists returns nothing, check for error
 
 # Get sold properties
-@st.cache(allow_output_mutation=True) # Mutations??
+@st.cache(allow_output_mutation=True, show_spinner=False) # Mutations??
 def fnc_getSoldData(postNr: list, soldYear: int):
 
-    dfSold = pd.DataFrame()
+    with st.spinner('Henter salgsdata fra Boliga...'):
+        
+        dfSold = pd.DataFrame()
 
-    for cntPst in postNr:
-        response = requests.get(f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}")
-        tRes = json.loads(response.text)
+        for cntPst in postNr:
+            response = requests.get(f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}")
+            tRes = json.loads(response.text)
 
-        dfh = pd.json_normalize(tRes)
-        pages = dfh.iloc[0,4]
-        df = pd.DataFrame()
-        for x in range(pages):
-            apiUrl = f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}&page={x+1}"
-            response = requests.get(apiUrl)
-            sold = json.loads(response.text)
-            dftmp = pd.json_normalize(sold, record_path=['results'])
-            dftmp['soldDate'] =  pd.to_datetime(dftmp['soldDate'], infer_datetime_format=True)
+            dfh = pd.json_normalize(tRes)
+            pages = dfh.iloc[0,4]
+            df = pd.DataFrame()
+            for x in range(pages):
+                apiUrl = f"https://api.boliga.dk/api/v2/sold/search/results?zipcodeFrom={cntPst}&zipcodeTo={cntPst}&page={x+1}"
+                response = requests.get(apiUrl)
+                sold = json.loads(response.text)
+                dftmp = pd.json_normalize(sold, record_path=['results'])
+                dftmp['soldDate'] =  pd.to_datetime(dftmp['soldDate'], infer_datetime_format=True)
 
-            dateYear = dftmp.iloc[0,4].year
+                dateYear = dftmp.iloc[0,4].year
 
-            if dateYear == soldYear-1:
-                break
+                if dateYear == soldYear-1:
+                    break
 
-            df = pd.concat([df, dftmp])
+                df = pd.concat([df, dftmp])
 
-        dfSold = pd.concat([dfSold, df]) 
+            dfSold = pd.concat([dfSold, df]) 
+    
+    #st.success('Done!')
 
     return dfSold  
 
@@ -86,37 +96,54 @@ def fnc_findAdressInRadius(dfAdress, dfSold):
 
 # Generate city name in multiselect
 def fnc_getName(pstNr, dfpst):
-    byNavn = dfpst.query("nr == @pstNr").iloc[0,2] 
-    return pstNr + " - " + byNavn
+    byNavn = dfpst.query("nr == @pstNr").iloc[0,3] 
+    return str(pstNr) + " - " + str(byNavn)
 
-
+#%%
 
 #######################################################################################
+# Desclare empty variables
 dfSoldDistFilt = pd.DataFrame()
 dfSoldDist = pd.DataFrame()
 dfSold = pd.DataFrame()
 dfSoldDist['Distance_m'] = 0
 featGrp_Solgte = folium.FeatureGroup("Solgte ejendomme")
 featGrp_Adress = folium.FeatureGroup("Valgte adresse")
+postNr = []
 
+#######################################################################################
+# Sidebare
 with st.sidebar:
     
     dfpst = fnc_getPostalCode()
-    postNr = st.multiselect("Vælg postnummer", dfpst["nr"], format_func=lambda pstNr: fnc_getName(pstNr, dfpst))
-    #postNr = st.number_input("Postnummer", value=2830, min_value=0, format="%i")
-    soldYear = st.number_input("Tidligste salgsår", value=2021, min_value=1990, format="%i")
-
-    dfSold = fnc_getSoldData(postNr, soldYear)
-    # for cntPst in postNr:
-    #     dfSold_tmp = fnc_getSoldData(cntPst, soldYear)
-    #     dfSold = pd.concat([dfSold,dfSold_tmp])
     
-    adresseStr = st.text_input("Skriv adresse i den valgte kommune", value="Hjertebjergvej 12")
-    distFilt_m = st.number_input("Søge afstand fra adresse", value=500, step=250, min_value=100, max_value=10000, format="%i")
-    dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
-    dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
-    dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
-    blShowPostCd = st.checkbox("Vis postnummer på kortet")
+    with st.form("formHentData"):
+        postNr = st.multiselect("Vælg postnummer", dfpst["nr"], format_func=lambda pstNr: fnc_getName(pstNr, dfpst))
+        soldYear = st.number_input("Tidligste salgsår", value=2021, min_value=1990, format="%i")
+        submitHentData = st.form_submit_button("Hent data")
+
+        if submitHentData:
+            if len(postNr)>0:
+                dfSold = fnc_getSoldData(postNr, soldYear)
+            else:
+                st.warning('Vælg først postnummer', icon="⚠️")
+    
+    if len(dfSold.index)>0:
+        with st.form("formUpdateVisuals"):
+            
+            adresseStr = st.selectbox("Vælg adresse i den valgte kommune", dfSold['address'])
+            #adresseStr = st.text_input("Skriv adresse i den valgte kommune", value="Hjertebjergvej 12")
+            distFilt_m = st.number_input("Søge afstand fra adresse", value=500, step=250, min_value=100, max_value=10000, format="%i")
+            submitUpdateVisuals = st.form_submit_button("Opdater visning")
+
+            if submitUpdateVisuals:
+                dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
+                dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
+                dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
+                blShowPostCd = st.checkbox("Vis postnummer på kortet")
+
+#######################################################################################
+# Main page
 
 if len(dfSoldDist.index)>0:
     #st.dataframe(dfSoldDistFilt)
@@ -144,7 +171,7 @@ if len(dfSoldDist.index)>0:
     # Add adress
     folium.CircleMarker([dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x']],
             radius=10,
-            popup="Adresse:" + dfadr['adgangsadresse.vejnavn'] + " " + dfadr['adgangsadresse.husnr'],
+            popup="Adresse:" + str(dfadr['adgangsadresse.vejnavn']) + " " + str(dfadr['adgangsadresse.husnr']),
             color='green',
             fill=True,
             fill_color='#cc0000',
@@ -210,6 +237,10 @@ if len(dfSoldDist.index)>0:
 #%%
 
 
+# dfpst = fnc_getPostalCode()
+# dfpst.to_excel("postalCodes.xlsx")  
+
+#dfpst = pd.read_excel("postalCodes.xlsx")
 
 #%%
 

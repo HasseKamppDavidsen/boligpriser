@@ -1,5 +1,7 @@
 #%%
 
+# streamlit run streamlit_app.py --theme.base "dark"
+
 import streamlit as st
 import json
 import requests
@@ -10,7 +12,7 @@ from streamlit_folium import folium_static
 import folium
 import openpyxl
 
-st.set_page_config(layout="wide")
+#st.set_page_config(layout="wide")
 
 #%%
 
@@ -76,7 +78,7 @@ def fnc_getSoldData(postNr: list, soldYear: int):
     return dfSold  
 
 #@st.cache
-def fnc_findAdressInRadius(dfAdress, dfSold):
+def fnc_findAdressInRadius(dfAdress, dfSold, propType):
     
     dfSold['Distance_m'] = "" 
 
@@ -99,17 +101,34 @@ def fnc_getName(pstNr, dfpst):
     byNavn = dfpst.query("nr == @pstNr").iloc[0,3] 
     return str(pstNr) + " - " + str(byNavn)
 
+def fnc_getPropertyName(propID, dfProp):
+    propStr = dfProp.query("ID == @propID").iloc[0,1] 
+    return str(propStr)
+
+dfPropType = pd.DataFrame({'ID':[1,2,3,4,5], 'Type':['Villa', 'Rækkehus', 'Ejerlejlighed', 'Fritidshus', 'Landejendom']})
+
 #%%
 
 #######################################################################################
 # Desclare empty variables
+if 'ssHentData' not in st.session_state:
+    st.session_state['ssHentData'] = False
+
+# if st.session_state['ssHentData'] == False:
+#     dfSold = pd.DataFrame()
+
 dfSoldDistFilt = pd.DataFrame()
 dfSoldDist = pd.DataFrame()
-dfSold = pd.DataFrame()
+
 dfSoldDist['Distance_m'] = 0
 featGrp_Solgte = folium.FeatureGroup("Solgte ejendomme")
 featGrp_Adress = folium.FeatureGroup("Valgte adresse")
+featGrp_PostNr = folium.FeatureGroup("Postnumre")
+
 postNr = []
+
+if 'ssHentData' not in st.session_state:
+    st.session_state['ssHentData'] = False
 
 #######################################################################################
 # Sidebare
@@ -120,36 +139,39 @@ with st.sidebar:
     with st.form("formHentData"):
         postNr = st.multiselect("Vælg postnummer", dfpst["nr"], format_func=lambda pstNr: fnc_getName(pstNr, dfpst))
         soldYear = st.number_input("Tidligste salgsår", value=2021, min_value=1990, format="%i")
-        submitHentData = st.form_submit_button("Hent data")
+        adresseStr = st.text_input("Skriv adresse der ligger i det først valgte postnummer", value="Hjertebjergvej 12")
+        distFilt_m = st.number_input("Søge afstand fra adresse", value=500, step=250, min_value=100, max_value=10000, format="%i")
+        propType = st.multiselect("Vælg boligtype", dfPropType["ID"], format_func=lambda propNr: fnc_getPropertyName(propNr, dfPropType))
+        blShowPostCd = st.checkbox("Vis postnummer på kortet")
+
+        submitHentData = st.form_submit_button("Opdater visning")
 
         if submitHentData:
             if len(postNr)>0:
                 dfSold = fnc_getSoldData(postNr, soldYear)
+                dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
+                if len(dfadr.index)>0:
+                    dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold, propType)
+                    dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
+                    st.session_state['ssHentData'] = True
+                else:                
+                    st.warning('Adressen blev ikke fundet inden for det først valgte postnummer', icon="⚠️")
+                
             else:
                 st.warning('Vælg først postnummer', icon="⚠️")
-    
-    if len(dfSold.index)>0:
-        with st.form("formUpdateVisuals"):
-            
-            adresseStr = st.selectbox("Vælg adresse i den valgte kommune", dfSold['address'])
-            #adresseStr = st.text_input("Skriv adresse i den valgte kommune", value="Hjertebjergvej 12")
-            distFilt_m = st.number_input("Søge afstand fra adresse", value=500, step=250, min_value=100, max_value=10000, format="%i")
-            submitUpdateVisuals = st.form_submit_button("Opdater visning")
-
-            if submitUpdateVisuals:
-                dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
-                dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold)
-                dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
-                blShowPostCd = st.checkbox("Vis postnummer på kortet")
 
 #######################################################################################
 # Main page
 
+
+# st.dataframe(dfSold)
+# st.dataframe(dfadr)
+# st.dataframe(dfSoldDist)
+# st.dataframe(dfSoldDist)
+
 if len(dfSoldDist.index)>0:
-    #st.dataframe(dfSoldDistFilt)
-    #Plot with center of jordstykke as center of map
     coords_adr = (dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x'])
-    map = folium.Map(location=coords_adr, zoom_start=15, tiles='OpenStreetMap')
+    map = folium.Map(location=coords_adr, zoom_start=15, tiles='Cartodb dark_matter')#,'CartoDB positron'])
     
     # Read topo with postal codes
     with open('postnumre.json') as f:
@@ -158,25 +180,26 @@ if len(dfSoldDist.index)>0:
     # Add topo to map
     cp = folium.Choropleth(geo_data=postNr_topo,
              topojson='objects.postnumre',
-             key_on='feature.properties.POSTNR_TXT',
+             key_on='feature.properties.Postnummer',
              fill_color='white', 
              fill_opacity=0.2,
              line_color='black', 
-             line_opacity=0.5).add_to(map)
+             line_opacity=0.5).add_to(featGrp_PostNr)
     
+    featGrp_PostNr.add_to(map)
+
     if blShowPostCd:
-        folium.GeoJsonTooltip(['POSTNR_TXT']).add_to(cp.geojson)
-    #folium.LayerControl().add_to(map)
+        folium.GeoJsonTooltip(['Postnummer']).add_to(cp.geojson)
 
     # Add adress
     folium.CircleMarker([dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x']],
             radius=10,
             popup="Adresse:" + str(dfadr['adgangsadresse.vejnavn']) + " " + str(dfadr['adgangsadresse.husnr']),
-            color='green',
+            color='#D6D3D2',
             fill=True,
-            fill_color='#cc0000',
+            fill_color='#3C4C39',
             fill_opacity=0.7,
-            parse_html=False).add_to(featGrp_Solgte) 
+            parse_html=False).add_to(featGrp_Adress) 
 
     featGrp_Adress.add_to(map)
 
@@ -185,27 +208,39 @@ if len(dfSoldDist.index)>0:
             folium.CircleMarker([row['latitude'], row['longitude']],
             radius=6,
             popup="Adresse: " + str(row['address']) + " Type: " + str(row['propertyType']),
-            color='blue',
+            color='#000000',
             fill=True,
-            fill_color='#3186cc',
+            fill_color='#ffffff',
             fill_opacity=0.7,
             parse_html=False).add_to(featGrp_Solgte) 
 
         featGrp_Solgte.add_to(map)
 
         folium.LayerControl().add_to(map)
+
+        with st.expander("Oversigtskort", expanded=True):
+            folium_static(map, width=670, height=500)
+        
+        with st.expander("Plot over priser"):
+            fig = px.scatter(dfSoldDistFilt, x='soldDate', y='price')#, color='GEOL_LEG_C', symbol='GEOL_LEG_C')
+            st.plotly_chart(fig)
     
-    folium_static(map)#, width=1250, height=500)
+        with st.expander("Rådata"):
+            st.dataframe(dfSoldDistFilt)
     
+
 # else:
-#     map = folium.Map(location=[55, 12], zoom_start=17, tiles='CartoDB positron')
+#     if st.session_state['ssHentData'] == False:
+#         st.header("Hent først data for én eller flere postnumre")
+#     elif st.session_state['ssHentData'] == True:
+#         st.header("Angiv adresse og opdater visning")
 
-# st.title('EDD Dataudtræk')
-
-# folium_static(map, width=1250, height=500)
 
 
-    fig = px.scatter(dfSoldDistFilt, x='soldDate', y='price')#, color='GEOL_LEG_C', symbol='GEOL_LEG_C')
+
+
+###############################################################################
+# Trash and test
 
     # fig.update_layout(
     #     title={
@@ -227,9 +262,7 @@ if len(dfSoldDist.index)>0:
     # fig.update_xaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
     # fig.update_yaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
 
-    st.plotly_chart(fig)
-
-    st.dataframe(dfSoldDistFilt)
+    
 #if st.button('Konverter data'):
         #st.dataframe(df)
 
@@ -273,3 +306,5 @@ if len(dfSoldDist.index)>0:
 # folium.LayerControl().add_to(folium_map)
 
 # folium_map
+
+#dfPropType = pd.DataFrame({'ID':[1,2,3,4,5], 'Type':['Villa', 'Rækkehus', 'Ejerlejlighed', 'Fritidshus', 'Landejendom']})

@@ -2,7 +2,6 @@
 
 # streamlit run streamlit_app.py --theme.base "dark"
 
-from smtplib import SMTPServerDisconnected
 import streamlit as st
 import json
 import requests

@@ -81,7 +81,7 @@ def fnc_getSoldData(postNr: list, soldYear: int, dfPropType):
     return dfSold  
 
 #@st.cache
-def fnc_findAdressInRadius(dfAdress, dfSold, propType):
+def fnc_findAdressInRadius(dfAdress, dfSold, propType, priceInterval):
     
     dfSold['Distance_m'] = "" 
     dfPropFilter = pd.DataFrame()
@@ -103,8 +103,14 @@ def fnc_findAdressInRadius(dfAdress, dfSold, propType):
             dfPropFilter = pd.concat([dfPropFilter, dfPropFilter_tmp])
         dfSold = dfPropFilter
 
-    dfSold['roll_sqmPrice'] = dfSold.sqmPrice.rolling(50).mean()
-    dfSold['roll_Price'] = dfSold.price.rolling(50).mean()
+    priceType = priceInterval[2]
+    minPrice = priceInterval[0]
+    dfSold = dfSold.query("{} >= @minPrice".format(priceType))
+    maxPrice = priceInterval[1]
+    dfSold = dfSold.query("{} <= @maxPrice".format(priceType))
+
+    dfSold['roll_sqmPrice'] = dfSold.sqmPrice.rolling(30, min_periods=5).mean()
+    dfSold['roll_Price'] = dfSold.price.rolling(30, min_periods=5).mean()
 
     dfSold.sort_values(by=['soldDate'], inplace=True)
 
@@ -181,12 +187,35 @@ with st.sidebar:
 
         submitHentData = st.form_submit_button("Opdater visning")
 
+        with st.expander("Indstillinger"):
+            
+            yaxisParameter = st.selectbox("Vælg parameter til plot", ['Kvadratmeterpriser','Salgspriser'])
+            
+            if yaxisParameter == 'Kvadratmeterpriser':
+                minInterval = 0
+                maxInterval = 200000
+                priceType = 'sqmPrice'
+            else:
+                minInterval = 0
+                maxInterval = 100000000
+                priceType = 'price'
+
+            priceInterval = st.slider(
+                'Vælg interval for priser',
+                min_value=minInterval, 
+                max_value=maxInterval, 
+                value=(minInterval, maxInterval),
+                step=5000)
+            
+            priceInterval = list(priceInterval)
+            priceInterval.append(priceType)
+
         if submitHentData:
             if len(postNr)>0:
                 dfSold = fnc_getSoldData(postNr, soldYear, dfPropType)
                 dfadr = fnc_getAdressCoordinates(adresseStr, postNr[0])
                 if len(dfadr.index)>0:
-                    dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold, propType)
+                    dfSoldDist = fnc_findAdressInRadius(dfadr, dfSold, propType, priceInterval)
                     if len(dfSoldDist.index)>0:
                         dfSoldDistFilt = dfSoldDist.query("Distance_m < @distFilt_m")
                         dfSoldDistFilt = fnc_findColorValue(dfSoldDistFilt)
@@ -207,7 +236,7 @@ with st.sidebar:
 
 if len(dfSoldDist.index)>0:
     coords_adr = (dfadr['adgangsadresse.y'], dfadr['adgangsadresse.x'])
-    map = folium.Map(location=coords_adr, zoom_start=15, tiles='Cartodb dark_matter')#,'CartoDB positron'])
+    map = folium.Map(location=coords_adr, zoom_start=15, tiles='Stamen Toner')#,'CartoDB positron']) / Cartodb dark_matter
     
     # Read topo with postal codes
     with open('postnumre.json') as f:
@@ -254,14 +283,14 @@ if len(dfSoldDist.index)>0:
 
         folium.LayerControl().add_to(map)
 
-        with st.expander("Oversigtskort", expanded=False):
+        with st.expander("Oversigtskort", expanded=True):
             folium_static(map, width=670, height=500)
         
-        with st.expander("Plot over priser", expanded=True):
+        with st.expander("Plot over priser", expanded=False):
 
             #yaxisParameter = st.selectbox("Vælg parameter til graf", ['Kvadratmeterpriser','Salgspriser'])
 
-            yaxisParameter = 'Kvadratmeterpriser'
+            #yaxisParameter = 'Kvadratmeterpriser'
 
             if yaxisParameter == 'Salgspriser':
                 yValue = 'price'
@@ -342,102 +371,5 @@ else:
         st.write("Intet at vise")
 
 
-
-
-
 ###############################################################################
 # Trash and test
-
-    # fig.update_layout(
-    #     title={
-    #         'text': 'Depth vs IVAN_IVAR',
-    #         'y':1.0,
-    #         'x':0.0,
-    #         #'xanchor': 'center',
-    #         #'yanchor': 'top'
-    #         },
-    #     yaxis_title="Depth (m b.g.)",
-    #     xaxis_title="Undistributed Vane shear strength (kPa)",
-    #     #xaxis={'side':'top'},
-    #     width = 600,
-    #     height = 600,
-    #     #paper_bgcolor='rgba(0,0,0,0)',
-    #     #plot_bgcolor='rgba(0,0,0,0)'
-    # )
-
-    # fig.update_xaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
-    # fig.update_yaxes(showline=True, linewidth=1, linecolor='black', mirror=True, gridcolor='Black')
-
-    
-#if st.button('Konverter data'):
-        #st.dataframe(df)
-
-
-#%%
-
-
-# dfpst = fnc_getPostalCode()
-# dfpst.to_excel("postalCodes.xlsx")  
-
-#dfpst = pd.read_excel("postalCodes.xlsx")
-
-#%%
-
-# dfpst = fnc_getPostalCode()
-# pstNr = '2800'
-# dfbyNavn = dfpst.query("nr == @pstNr").iloc[0,2] 
-# byNavn = dfbyNavn.iloc[0,2] 
-
-#states_topo.keys()
-#states_topo['objects'].keys()
-#postNr_topo['objects']['postnumre'].keys()
-#postNr_topo['objects']['postnumre']['geometries'][0]['properties']['POSTNR_TXT']
-
-# with open('postnumre.json') as f:
-#     postNr_topo = json.load(f)
-
-# folium_map = folium.Map(location=[55.79044716, 12.48303272],
-#                         zoom_start=10,
-#                         tiles="OpenStreetMap")
-
-# cp = folium.Choropleth(geo_data=postNr_topo,
-#              topojson='objects.postnumre',
-#              key_on='feature.properties.POSTNR_TXT',
-#              fill_color='white', 
-#              fill_opacity=0.2,
-#              line_color='black', 
-#              line_opacity=0.5).add_to(folium_map)
-
-# folium.GeoJsonTooltip(['POSTNR_TXT']).add_to(cp.geojson)
-# folium.LayerControl().add_to(folium_map)
-
-# folium_map
-
-#dfPropType = pd.DataFrame({'ID':[1,2,3,4,5], 'Type':['Villa', 'Rækkehus', 'Ejerlejlighed', 'Fritidshus', 'Landejendom']})
-
-
-# import matplotlib
-# import matplotlib.pyplot as plt
-# import numpy as np
-
-# x = 0.1
-
-# myColor = [(2*x),(2*(1 - x)),0]
-# newColor = []
-
-# for c in myColor:
-#     if c > 1:
-#         newColor.append(1)
-#     else:
-#         cc = c
-#         newColor.append(cc)
-
-# res = matplotlib.colors.to_hex(newColor)
-# print(res)
-# print(newColor)
-
-# xpoints = np.array([1, 8])
-# ypoints = np.array([3, 10])
-
-# plt.plot(xpoints, ypoints, res)
-# plt.show()

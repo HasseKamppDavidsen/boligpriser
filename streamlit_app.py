@@ -2,6 +2,7 @@
 
 # streamlit run streamlit_app.py --theme.base "dark"
 
+from smtplib import SMTPServerDisconnected
 import streamlit as st
 import json
 import requests
@@ -13,6 +14,8 @@ from streamlit_folium import folium_static
 import folium
 import openpyxl
 import matplotlib as mpl
+import datetime 
+
 
 #st.set_page_config(layout="wide")
 
@@ -144,6 +147,49 @@ def fnc_findColor(priceval):
 
     return mpl.colors.to_hex(newColor)
 
+def popHtml(row):
+
+    strAddress = row['address']
+    strSoldDate = row['soldDate'].strftime("%Y-%m-%d")
+    strPrice = '{:,}'.format(row['price'])
+    strSize = row['size']
+    strType = row['propertyName']
+
+    html =f"""
+        <html>
+            <tbody>
+                <table style="width: 250px;">
+                    <tr>
+                        <th style="background-color:#eeeeee;border: 1px solid black;padding-left: 5px;padding-right: 5px;"><b>Parameter</b></th>
+                        <th style="background-color:#eeeeee;border: 1px solid black;padding-left: 5px;padding-right: 5px;"><b>Værdi</b></th>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">Adresse</td>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">{strAddress}</td>
+                    </tr>    
+                    <tr>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">Salgsdato</td>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">{strSoldDate}</td>
+                    </tr> 
+                    <tr>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">Pris (DKK)</td>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">{strPrice}</td>
+                    </tr>   
+                    <tr>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">Boligareal (m2)</td>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">{strSize}</td>
+                    </tr>   
+                    <tr>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">Boligtype</td>
+                        <td style="border: 1px solid black;padding-left: 5px;padding-right: 5px;">{strType}</td>
+                    </tr>     
+
+                </table>       
+            </tbody>
+        </html>
+    """
+    return html
+
 dfPropType = pd.DataFrame({'ID':[1,2,3,4,5], 'Type':['Villa', 'Rækkehus', 'Ejerlejlighed', 'Fritidshus', 'Landejendom']})
 
 #%%
@@ -270,15 +316,20 @@ if len(dfSoldDist.index)>0:
 
     if len(dfSoldDistFilt.index) > 0:
         for index, row in dfSoldDistFilt.iterrows():
-            folium.CircleMarker([row['latitude'], row['longitude']],
-            radius=6,
-            popup="Adresse: " + str(row['address']) + " Type: " + str(row['propertyType']),
-            color='#000000',
-            fill=True,
-            fill_color=fnc_findColor(row['ColorScale']),
-            fill_opacity=0.7,
-            parse_html=False).add_to(featGrp_Solgte) 
+            fol_c = folium.CircleMarker([row['latitude'], row['longitude']],
+                                        radius=6,
+                                        color='#000000',
+                                        fill=True,
+                                        fill_color=fnc_findColor(row['ColorScale']),
+                                        fill_opacity=0.7,
+                                        parse_html=False)
+            
+            html = popHtml(row)
+            folium.Popup(folium.Html(html, script=True)).add_to(fol_c)
+                
+            fol_c.add_to(featGrp_Solgte) 
 
+        
         featGrp_Solgte.add_to(map)
 
         folium.LayerControl().add_to(map)
